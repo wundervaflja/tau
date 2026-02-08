@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__serena__list_dir",
+      "Bash(tree:*)",
+      "Bash(wc:*)",
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(npx tsc:*)",
+      "Bash(npx vite:*)",
+      "mcp__serena__think_about_task_adherence",
+      "Bash(cat:*)"
+    ]
+  }
+}
