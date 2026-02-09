@@ -10,7 +10,8 @@
  * - Monitor heartbeat for daemon health
  */
 import { WebSocket } from "ws";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
+import { existsSync, openSync, readFileSync, readdirSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -173,7 +174,6 @@ export class DaemonClient {
     const devEntryPoint = path.join(projectRoot, "src", "daemon", "index.ts");
     // In Electron, process.resourcesPath is always set (even in dev), so we
     // detect dev mode by checking whether the daemon source file exists.
-    const { existsSync } = await import("node:fs");
     const isDev = existsSync(devEntryPoint);
 
     let command: string;
@@ -189,7 +189,11 @@ export class DaemonClient {
       ];
     } else {
       // In production: the daemon is bundled as ESM in extraResources/daemon-pkg/
-      command = "node";
+      // We must find the real system `node` binary because:
+      //  - process.execPath is the Electron binary, not Node
+      //  - ELECTRON_RUN_AS_NODE=1 is ignored in code-signed macOS apps
+      //  - macOS .app bundles have a minimal PATH that excludes typical node locations
+      command = resolveNodeBinary();
       const daemonScript = path.join(process.resourcesPath!, "daemon-pkg", "index.mjs");
       args = [
         daemonScript,
@@ -201,7 +205,6 @@ export class DaemonClient {
 
     // Log daemon stdout/stderr to a file for debugging instead of discarding
     const logPath = path.join(getDaemonDir(), "tau-daemon.log");
-    const { openSync } = await import("node:fs");
     const logFd = openSync(logPath, "a");
 
     const child = spawn(command, args, {
@@ -458,6 +461,114 @@ function isProcessAlive(pid: number): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Find a system `node` binary (≥ v18) that supports ESM.
+ *
+ * Inside a packaged macOS .app the PATH is minimal and doesn't include
+ * typical Node install locations.  We check version-manager paths first
+ * (nvm, fnm, volta) since they're most likely to have a recent Node,
+ * then fall back to well-known system paths and login-shell resolution.
+ *
+ * Every candidate is validated with `node --version` to ensure it's ≥ v18.
+ */
+function resolveNodeBinary(): string {
+  const home = process.env.HOME || "";
+  const MIN_MAJOR = 18;
+
+  // Candidates ordered: version managers first (most likely modern), then system paths
+  const candidates: string[] = [];
+
+  // 1. nvm paths (highest priority — user explicitly manages versions here)
+  if (home) {
+    try {
+      const nvmDir = path.join(home, ".nvm", "versions", "node");
+      if (existsSync(nvmDir)) {
+        // nvm default alias
+        const defaultAlias = path.join(home, ".nvm", "alias", "default");
+        if (existsSync(defaultAlias)) {
+          try {
+            const ver = readFileSync(defaultAlias, "utf-8").trim();
+            const versionedPath = ver.startsWith("v")
+              ? path.join(nvmDir, ver, "bin", "node")
+              : path.join(nvmDir, `v${ver}`, "bin", "node");
+            candidates.push(versionedPath);
+          } catch { /* ignore */ }
+        }
+        // Scan installed nvm versions (newest first)
+        try {
+          const versions = readdirSync(nvmDir)
+            .filter((d: string) => d.startsWith("v"))
+            .sort()
+            .reverse();
+          for (const v of versions) {
+            candidates.push(path.join(nvmDir, v, "bin", "node"));
+          }
+        } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+
+    // fnm / volta
+    candidates.push(path.join(home, ".fnm", "current", "bin", "node"));
+    candidates.push(path.join(home, ".volta", "bin", "node"));
+  }
+
+  // 2. System paths (may have old versions — validated below)
+  candidates.push("/opt/homebrew/bin/node");  // macOS Apple Silicon (Homebrew)
+  candidates.push("/usr/local/bin/node");     // macOS Intel (Homebrew / installer)
+  candidates.push("/usr/bin/node");           // Linux / system install
+
+  // Check each candidate: must exist AND be a modern enough version
+  for (const p of candidates) {
+    if (!existsSync(p)) continue;
+    if (isNodeVersionOk(p, MIN_MAJOR)) {
+      console.log(`[daemon-client] Resolved node binary: ${p}`);
+      return p;
+    }
+    console.log(`[daemon-client] Skipping ${p} — too old (need v${MIN_MAJOR}+)`);
+  }
+
+  // 3. Fallback: resolve from the user's login shell
+  const shells = [
+    process.env.SHELL || "/bin/zsh",
+    "/bin/zsh",
+    "/bin/bash",
+  ];
+  for (const shell of [...new Set(shells)]) {
+    try {
+      const resolved = execFileSync(shell, ["-lc", "which node"], {
+        encoding: "utf-8",
+        timeout: 5_000,
+      }).trim();
+      if (resolved && existsSync(resolved) && isNodeVersionOk(resolved, MIN_MAJOR)) {
+        console.log(`[daemon-client] Resolved node binary via ${shell}: ${resolved}`);
+        return resolved;
+      }
+    } catch {
+      // try next shell
+    }
+  }
+
+  throw new Error(
+    `Could not find Node.js >= v${MIN_MAJOR}. Please install a modern Node.js ` +
+    "(https://nodejs.org) and ensure it is on your PATH.",
+  );
+}
+
+/** Returns true if the node binary at `p` reports a major version >= `minMajor`. */
+function isNodeVersionOk(p: string, minMajor: number): boolean {
+  try {
+    const out = execFileSync(p, ["--version"], {
+      encoding: "utf-8",
+      timeout: 3_000,
+    }).trim(); // e.g. "v22.21.0"
+    const match = out.match(/^v(\d+)/);
+    if (!match) return false;
+    return parseInt(match[1], 10) >= minMajor;
+  } catch {
+    return false;
+  }
 }
 
 /**

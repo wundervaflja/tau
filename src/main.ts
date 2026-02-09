@@ -122,13 +122,15 @@ app.on("ready", async () => {
   createWindow();
   setupPtyHandlers();
 
+  // Wire all IPC channels as proxies to daemon RPC.
+  // This must happen BEFORE daemon connection so the renderer always has
+  // handlers registered — calls will queue/fail gracefully if daemon is down.
+  wireDaemonToIpc(daemonClient, ipcMain, () => mainWindow, IPC);
+
   // Connect to daemon (spawning it if needed)
   try {
     await daemonClient.ensureRunning();
     console.log("[main] Connected to tau-daemon");
-
-    // Wire all IPC channels as proxies to daemon RPC
-    wireDaemonToIpc(daemonClient, ipcMain, () => mainWindow, IPC);
   } catch (err) {
     console.error("[main] Failed to connect to daemon:", err);
     // The app can still show UI — the daemon client will auto-reconnect
