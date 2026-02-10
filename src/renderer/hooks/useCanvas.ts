@@ -32,7 +32,7 @@ export function useCanvas() {
     return () => window.removeEventListener("canvas:update", onUpdate);
   }, []);
 
-  /** Spawn a subagent to handle the canvas interaction. */
+  /** Send canvas interaction to the main agent as a prompt (not subagent). */
   const submitInteraction = useCallback(async (interaction: CanvasInteraction) => {
     const parts: string[] = [
       `[Canvas interaction]`,
@@ -42,7 +42,7 @@ export function useCanvas() {
 
     const entries = Object.entries(interaction.values);
     if (entries.length > 0) {
-      parts.push("Values:");
+      parts.push("Current form values:");
       for (const [key, value] of entries) {
         parts.push(`  ${key}: ${JSON.stringify(value)}`);
       }
@@ -53,14 +53,13 @@ export function useCanvas() {
     }
 
     const task = parts.join("\n");
-    const name = `canvas:${interaction.action}`;
 
+    console.log("[canvas] Submitting interaction to main agent:", { action: interaction.action, values: interaction.values });
     try {
-      await bridge.spawnSubagents([{ name, task }]);
-    } catch (err) {
-      // Fallback to main agent if subagent spawn fails
-      console.warn("[canvas] Subagent spawn failed, falling back to prompt:", err);
       await bridge.prompt(task);
+      console.log("[canvas] Interaction sent to main agent");
+    } catch (err) {
+      console.error("[canvas] Failed to send interaction:", err);
     }
   }, []);
 

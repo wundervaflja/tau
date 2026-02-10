@@ -750,7 +750,11 @@ export function CanvasView() {
 
   const handleButtonClick = useCallback(
     (action: string) => {
-      if (!spec) return;
+      console.log("[canvas] Button clicked, action:", action);
+      if (!spec) {
+        console.warn("[canvas] No spec available for interaction");
+        return;
+      }
 
       // Collect selected rows
       const allSelectedRows: Record<string, number[]> = {};
