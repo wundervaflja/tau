@@ -31,6 +31,13 @@ const config: ForgeConfig = {
     new MakerZIP({}, ['darwin']),
     new MakerDMG({
       format: 'ULFO',
+      additionalDMGOptions: {
+        'background-color': '#1a1a2e',
+        'icon-size': 80,
+        window: {
+          size: { width: 540, height: 380 },
+        },
+      },
     }),
     new MakerRpm({}),
     new MakerDeb({}),

@@ -16,6 +16,7 @@ import { DaemonServer } from "./server";
 import { AgentHost } from "./agent-host";
 import { Heartbeat, ensureHeartbeatFile } from "./heartbeat";
 import { TaskWatcher } from "./task-watcher";
+import { JournalWatcher } from "./journal-watcher";
 import { buildHandlers } from "./handlers";
 import {
   ensureDaemonDir,
@@ -74,6 +75,7 @@ async function main(): Promise<void> {
   const host = new AgentHost(server);
   const heartbeat = new Heartbeat(host, server);
   let taskWatcher: TaskWatcher | null = null;
+  let journalWatcher: JournalWatcher | null = null;
 
   // Register RPC handlers (pass heartbeat for status/config RPCs)
   const handlers = buildHandlers(host, server, heartbeat);
@@ -111,6 +113,10 @@ async function main(): Promise<void> {
   }
   taskWatcher.start();
 
+  // Start journal watcher — extracts memories from new journal paragraphs
+  journalWatcher = new JournalWatcher(cwd, host);
+  await journalWatcher.start();
+
   console.log("[daemon] Ready — listening for connections");
 
   // ── Graceful shutdown ───────────────────────────────────────────────
@@ -122,6 +128,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
 
     console.log("[daemon] Shutting down...");
+    journalWatcher?.stop();
     taskWatcher?.stop();
     heartbeat.stop();
     host.dispose();

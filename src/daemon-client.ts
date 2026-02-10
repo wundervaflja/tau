@@ -14,6 +14,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { existsSync, openSync, readFileSync, readdirSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import {
   getDaemonDir,
   getPidFilePath,
@@ -207,10 +208,15 @@ export class DaemonClient {
     const logPath = path.join(getDaemonDir(), "tau-daemon.log");
     const logFd = openSync(logPath, "a");
 
+    // Default working directory: ~/tau (created if missing).
+    // In a packaged .app, process.cwd() is "/" which is useless.
+    const tauHome = path.join(os.homedir(), "tau");
+    await fs.mkdir(tauHome, { recursive: true });
+
     const child = spawn(command, args, {
       detached: true,
       stdio: ["ignore", logFd, logFd],
-      cwd: process.cwd(),
+      cwd: tauHome,
       env: { ...process.env },
     });
 

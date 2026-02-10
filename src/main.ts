@@ -8,7 +8,7 @@
  * - IPC proxy: renderer ↔ daemon via DaemonClient
  * - Daemon lifecycle (spawn / connect / reconnect)
  */
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Tray, Menu, nativeImage } from "electron";
 import path from "node:path";
 import started from "electron-squirrel-startup";
 import { IPC } from "./shared/ipc-channels";
@@ -20,6 +20,7 @@ if (started) app.quit();
 let mainWindow: BrowserWindow | null = null;
 const daemonClient = new DaemonClient();
 let ptyManager: PtyManager | null = null;
+let tray: Tray | null = null;
 
 // ── Window creation ─────────────────────────────────────────────────
 
@@ -116,11 +117,70 @@ function setupPtyHandlers() {
   });
 }
 
+// ── System tray ─────────────────────────────────────────────────────
+
+// 16x16 tau (τ) template PNG — black on transparent for macOS auto dark/light
+const TRAY_ICON_B64 =
+  "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAHUlEQVR4nGNgGHbgP5GYdgbgMpBsMGrAsDBgCAAA2g4j3XGGrdEAAAAASUVORK5CYII=";
+
+function createTray() {
+  const icon = nativeImage.createFromDataURL(
+    `data:image/png;base64,${TRAY_ICON_B64}`,
+  );
+  icon.setTemplateImage(true);
+  tray = new Tray(icon);
+  tray.setToolTip("Tau");
+  updateTrayMenu();
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  const connected = daemonClient.connected;
+  const menu = Menu.buildFromTemplate([
+    { label: `Daemon: ${connected ? "Running" : "Stopped"}`, enabled: false },
+    { type: "separator" },
+    {
+      label: connected ? "Stop Daemon" : "Start Daemon",
+      click: async () => {
+        if (connected) {
+          try {
+            await daemonClient.call("daemon.shutdown", {});
+          } catch { /* daemon may already be gone */ }
+          daemonClient.disconnect();
+        } else {
+          try {
+            await daemonClient.ensureRunning();
+          } catch (err) {
+            console.error("[main] Failed to start daemon from tray:", err);
+          }
+        }
+        updateTrayMenu();
+      },
+    },
+    { type: "separator" },
+    {
+      label: "Show Window",
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        } else {
+          createWindow();
+        }
+      },
+    },
+    { type: "separator" },
+    { label: "Quit", click: () => app.quit() },
+  ]);
+  tray.setContextMenu(menu);
+}
+
 // ── App lifecycle ───────────────────────────────────────────────────
 
 app.on("ready", async () => {
   createWindow();
   setupPtyHandlers();
+  createTray();
 
   // Wire all IPC channels as proxies to daemon RPC.
   // This must happen BEFORE daemon connection so the renderer always has
@@ -131,6 +191,7 @@ app.on("ready", async () => {
   try {
     await daemonClient.ensureRunning();
     console.log("[main] Connected to tau-daemon");
+    updateTrayMenu();
   } catch (err) {
     console.error("[main] Failed to connect to daemon:", err);
     // The app can still show UI — the daemon client will auto-reconnect
@@ -143,6 +204,7 @@ app.on("ready", async () => {
 
   daemonClient.onDisconnect = () => {
     console.warn("[main] Lost connection to daemon — reconnecting...");
+    updateTrayMenu();
   };
 });
 
