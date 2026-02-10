@@ -1729,47 +1729,29 @@ Extract memories as JSON:
   "decisions": ["decision1"]
 }`;
 
-      // Make a lightweight LLM call using the current session's model
-      const model = this.session?.model;
-      if (!model) {
-        console.log("[tau] No model available for memory extraction, skipping");
+      // Use the existing session (already authenticated via subscription/OAuth)
+      // instead of completeSimple which requires a raw API key.
+      if (!this.session) {
+        console.log("[tau] No session available for memory extraction, skipping");
         return;
       }
 
-      const aiSdk = await import("@mariozechner/pi-ai");
-      let apiKey: string | undefined;
-      try {
-        apiKey = await this.modelRegistry?.getApiKey(model);
-      } catch {
-        // getApiKey may throw if provider isn't configured
-      }
-      if (!apiKey) {
-        console.log("[tau] No API key for memory extraction, skipping");
-        return;
-      }
+      const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
 
-      let result: any;
+      let responseText = "";
       try {
-        result = await aiSdk.completeSimple(model, {
-          systemPrompt,
-          messages: [
-            { role: "user" as const, content: userPrompt, timestamp: Date.now() },
-          ],
-        }, { reasoning: "off" });
+        this._silent = true;
+        // Use session.prompt which reuses the existing auth (subscription/OAuth/API key)
+        await this.session.prompt(fullPrompt);
+
+        // Get the last assistant response
+        responseText = this.session.getLastAssistantText() || "";
       } catch (err: any) {
-        const msg = err?.message ?? "";
-        if (msg.includes("No API key") || msg.includes("API key") || msg.includes("auth") || msg.includes("401")) {
-          console.log("[tau] API key issue for memory extraction, skipping:", msg);
-          return;
-        }
-        throw err;
+        console.log("[tau] Memory extraction prompt failed:", err?.message || err);
+        return;
+      } finally {
+        this._silent = false;
       }
-
-      // Parse the LLM response
-      const responseText = result.content
-        .filter((c: any) => c.type === "text")
-        .map((c: any) => c.text)
-        .join("");
 
       let parsed: {
         summary?: string;
@@ -2113,22 +2095,6 @@ Extract memories as JSON:
    */
   private async triggerSoulEvolution(): Promise<void> {
     try {
-      const model = this.session?.model;
-      if (!model) {
-        console.log("[tau] No model available for soul evolution, skipping");
-        return;
-      }
-
-      const aiSdk = await import("@mariozechner/pi-ai");
-      let apiKey: string | undefined;
-      try {
-        apiKey = await this.modelRegistry?.getApiKey(model);
-      } catch { /* ignore */ }
-      if (!apiKey) {
-        console.log("[tau] No API key for soul evolution, skipping");
-        return;
-      }
-
       // Read current SOUL.md
       const soulContent = await readSoul();
       if (!soulContent) return;
@@ -2183,21 +2149,24 @@ Analyze and return proposals as JSON:
   "skipped": ["traits considered but not enough evidence"]
 }`;
 
-      let result: any;
-      try {
-        result = await aiSdk.completeSimple(model, {
-          systemPrompt,
-          messages: [{ role: "user" as const, content: userPrompt, timestamp: Date.now() }],
-        }, { reasoning: "off" });
-      } catch (err: any) {
-        console.log("[tau] Soul evolution LLM call failed:", err?.message);
+      // Use existing session (already authenticated) instead of completeSimple
+      if (!this.session) {
+        console.log("[tau] No session available for soul evolution, skipping");
         return;
       }
 
-      const responseText = result.content
-        .filter((c: any) => c.type === "text")
-        .map((c: any) => c.text)
-        .join("");
+      const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+      let responseText = "";
+      try {
+        this._silent = true;
+        await this.session.prompt(fullPrompt);
+        responseText = this.session.getLastAssistantText() || "";
+      } catch (err: any) {
+        console.log("[tau] Soul evolution prompt failed:", err?.message);
+        return;
+      } finally {
+        this._silent = false;
+      }
 
       let parsed: any;
       try {

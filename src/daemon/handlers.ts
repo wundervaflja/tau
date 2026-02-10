@@ -14,6 +14,7 @@ import type { AgentHost } from "./agent-host";
 import type { DaemonServer } from "./server";
 import type { RpcHandler } from "./server";
 import type { Heartbeat } from "./heartbeat";
+import type { ExtensionHost } from "./extension-host";
 import {
   addNote,
   addTelemetry,
@@ -85,6 +86,7 @@ export function buildHandlers(
   host: AgentHost,
   server: DaemonServer,
   heartbeat?: Heartbeat,
+  extensionHost?: ExtensionHost,
 ): Record<string, RpcHandler> {
   const am = () => host.getAgentManager();
   const gm = () => host.getGitManager();
@@ -566,6 +568,20 @@ If the entry seems complete (substantial content, end-of-day reflections), save 
       heartbeat?.setInterval(params?.[0] ?? params?.ms),
     [RPC.HEARTBEAT_SET_ENABLED]: (params) =>
       heartbeat?.setEnabled(params?.[0] ?? params?.enabled),
+
+    // ── Extensions ──────────────────────────────────────────────────
+    [RPC.EXT_LIST]: () => extensionHost?.list() ?? [],
+    [RPC.EXT_RELOAD]: async () => {
+      await extensionHost?.reload();
+      return { ok: true };
+    },
+    [RPC.EXT_TOOLS]: () => extensionHost?.getTools() ?? [],
+    [RPC.EXT_CALL_TOOL]: async (params) => {
+      if (!extensionHost) throw new Error("Extension host not available");
+      const name = params?.[0] ?? params?.name;
+      const toolParams = params?.[1] ?? params?.params ?? {};
+      return extensionHost.callTool(name, toolParams);
+    },
 
     // ── Telemetry ───────────────────────────────────────────────────
     [RPC.TELEMETRY_ADD]: (params) => addTelemetry(params?.[0] ?? params),

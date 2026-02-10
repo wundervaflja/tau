@@ -17,6 +17,7 @@ import { AgentHost } from "./agent-host";
 import { Heartbeat, ensureHeartbeatFile } from "./heartbeat";
 import { TaskWatcher } from "./task-watcher";
 import { JournalWatcher } from "./journal-watcher";
+import { ExtensionHost } from "./extension-host";
 import { buildHandlers } from "./handlers";
 import {
   ensureDaemonDir,
@@ -76,9 +77,10 @@ async function main(): Promise<void> {
   const heartbeat = new Heartbeat(host, server);
   let taskWatcher: TaskWatcher | null = null;
   let journalWatcher: JournalWatcher | null = null;
+  const extensionHost = new ExtensionHost();
 
-  // Register RPC handlers (pass heartbeat for status/config RPCs)
-  const handlers = buildHandlers(host, server, heartbeat);
+  // Register RPC handlers (pass heartbeat + extension host for status/config RPCs)
+  const handlers = buildHandlers(host, server, heartbeat, extensionHost);
   server.handleAll(handlers);
 
   // Daemon-specific: shutdown RPC
@@ -117,6 +119,25 @@ async function main(): Promise<void> {
   journalWatcher = new JournalWatcher(cwd, host);
   await journalWatcher.start();
 
+  // Start extension host — sandboxed worker-thread extensions from ~/.tau/extensions/
+  extensionHost.onCreateMemory = async (memoryType, title, content, tags) => {
+    const agent = host.getAgentManager();
+    if (agent) {
+      await agent.prompt(
+        `Create a memory: type=${memoryType}, title="${title}", content="${content}"${tags ? `, tags=${tags.join(",")}` : ""}. Use the create_memory tool.`,
+      );
+    }
+  };
+  extensionHost.onBashRequest = async (command, timeout) => {
+    const { execSync } = await import("node:child_process");
+    return execSync(command, {
+      timeout: timeout ?? 30_000,
+      encoding: "utf-8",
+      cwd: host.getCwd() || process.cwd(),
+    });
+  };
+  await extensionHost.start();
+
   console.log("[daemon] Ready — listening for connections");
 
   // ── Graceful shutdown ───────────────────────────────────────────────
@@ -128,6 +149,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
 
     console.log("[daemon] Shutting down...");
+    extensionHost.stop();
     journalWatcher?.stop();
     taskWatcher?.stop();
     heartbeat.stop();

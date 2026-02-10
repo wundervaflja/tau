@@ -184,6 +184,12 @@ const REQUEST_CHANNELS: ChannelDef[] = [
   { key: "PROJECT_CTX_GET",       ipc: "project-ctx:get",          rpc: "projectCtx.get" },
   { key: "PROJECT_CTX_SET",       ipc: "project-ctx:set",          rpc: "projectCtx.set" },
   { key: "PROJECT_CTX_LIST",      ipc: "project-ctx:list",         rpc: "projectCtx.list" },
+
+  // Extensions
+  { key: "EXT_LIST",              ipc: "ext:list",                 rpc: "ext.list" },
+  { key: "EXT_RELOAD",            ipc: "ext:reload",               rpc: "ext.reload" },
+  { key: "EXT_TOOLS",             ipc: "ext:tools",                rpc: "ext.tools" },
+  { key: "EXT_CALL_TOOL",         ipc: "ext:call-tool",            rpc: "ext.callTool" },
 ];
 
 // ── Push/notification channels ─────────────────────────────────────────
